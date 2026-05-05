@@ -1,0 +1,101 @@
+from __future__ import annotations
+
+import time
+from collections.abc import Iterator
+
+import httpx
+
+from marketplace_aggregator._utils import parse_grade_from_name
+from marketplace_aggregator.models import OTCListing
+
+ME_LISTINGS_URL = "https://api-mainnet.magiceden.dev/v2/collections/phygitals/listings"
+_SOL_USD_CACHE: dict = {}
+
+
+def _get_sol_usd(client: httpx.Client) -> float:
+    if _SOL_USD_CACHE:
+        return _SOL_USD_CACHE["price"]
+    try:
+        r = client.get(
+            "https://api.coingecko.com/api/v3/simple/price",
+            params={"ids": "solana", "vs_currencies": "usd"},
+            timeout=10,
+        )
+        price = r.json()["solana"]["usd"]
+    except Exception:
+        price = 150.0
+    _SOL_USD_CACHE["price"] = price
+    return price
+
+
+def _attr(attrs: list[dict], trait: str) -> str | None:
+    for a in attrs:
+        if a.get("trait_type") == trait:
+            v = a.get("value")
+            return str(v) if v is not None else None
+    return None
+
+
+def _normalize(listing: dict, sol_usd: float) -> OTCListing:
+    token: dict = listing.get("token") or {}
+    attrs: list[dict] = token.get("attributes") or []
+    name = token.get("name") or ""
+    price_sol = listing.get("price")
+
+    grade_raw = _attr(attrs, "Grade")
+    grader: str | None = None
+    grade: str | None = None
+    if grade_raw and grade_raw.lower() != "ungraded":
+        # Grade attr value is e.g. "CGC 9.5" or "PSA 10.0"
+        grader, grade = parse_grade_from_name(grade_raw)
+        if grader is None:
+            # Fall back to Grader attribute and strip prefix from Grade
+            grader = _attr(attrs, "Grader")
+            parts = grade_raw.split()
+            grade = parts[-1] if parts else grade_raw
+
+    token_addr = listing.get("tokenAddress") or ""
+    return OTCListing(
+        source="phygitals",
+        listing_id=token_addr or listing.get("pdaAddress", ""),
+        card_name=_attr(attrs, "Title") or name,
+        set_name=_attr(attrs, "Set"),
+        card_number=_attr(attrs, "Number"),
+        grade=grade,
+        grader=grader,
+        cert_number=_attr(attrs, "Cert Number"),
+        ask_usd=price_sol * sol_usd if price_sol is not None else None,
+        bid_usd=None,
+        insured_usd=None,
+        listing_url=f"https://magiceden.io/item-details/{token_addr}" if token_addr else None,
+        image_url=token.get("image") or listing.get("extra", {}).get("img"),
+        franchise="pokemon",
+        listed_at=None,
+    )
+
+
+def fetch(client: httpx.Client, max_pages: int | None = None) -> Iterator[OTCListing]:
+    sol_usd = _get_sol_usd(client)
+    offset = 0
+    limit = 100
+    page = 0
+    while True:
+        resp = client.get(ME_LISTINGS_URL, params={"offset": offset, "limit": limit})
+        resp.raise_for_status()
+        listings = resp.json()
+        if not listings:
+            break
+        for listing in listings:
+            token = listing.get("token") or {}
+            attrs = token.get("attributes") or []
+            category = _attr(attrs, "Category") or ""
+            if "pokemon" not in category.lower():
+                continue
+            yield _normalize(listing, sol_usd)
+        offset += limit
+        page += 1
+        if len(listings) < limit:
+            break
+        if max_pages and page >= max_pages:
+            break
+        time.sleep(0.2)
