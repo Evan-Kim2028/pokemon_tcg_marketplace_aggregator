@@ -2,7 +2,9 @@ from __future__ import annotations
 
 import argparse
 import json
-from datetime import datetime, timezone
+import sys
+from collections import Counter
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from rich import print as rprint
@@ -86,14 +88,107 @@ def run(
     return all_listings
 
 
+def merge(data_dir: Path, days: int, output: Path | None) -> None:
+    """Merge all snapshots from the past N days into one deduped NDJSON."""
+    cutoff = datetime.now(timezone.utc) - timedelta(days=days)
+    snapshots = sorted(data_dir.glob("**/*.ndjson"))
+    # Exclude any previously merged files so we don't double-count
+    snapshots = [p for p in snapshots if not p.name.startswith("merged_")]
+
+    if not snapshots:
+        rprint(f"[yellow]No snapshot files found in {data_dir}[/yellow]")
+        return
+
+    rprint(f"\n[bold cyan]Scanning {len(snapshots)} snapshot file(s) in {data_dir}…[/bold cyan]")
+
+    total_raw = 0
+    files_used = 0
+    # key → best (most-recent fetched_at) record
+    best: dict[tuple[str, str], dict] = {}
+
+    for snap in snapshots:
+        file_count = 0
+        try:
+            for line in snap.read_text().splitlines():
+                line = line.strip()
+                if not line:
+                    continue
+                d = json.loads(line)
+                fa = d.get("fetched_at", "")
+                if fa:
+                    try:
+                        dt = datetime.fromisoformat(fa.replace("Z", "+00:00"))
+                        if dt < cutoff:
+                            continue
+                    except ValueError:
+                        pass
+
+                total_raw += 1
+                file_count += 1
+                src = d.get("source", "")
+                cert = d.get("cert_number") or ""
+                lid = d.get("listing_id", "")
+                # Prefer cert as stable identity; fall back to listing_id
+                key: tuple[str, str] = (src, cert) if cert else (src, lid)
+
+                existing = best.get(key)
+                if existing is None or (fa and fa > existing.get("fetched_at", "")):
+                    best[key] = d
+        except Exception as e:
+            rprint(f"[yellow]  Skipping {snap.name}: {e}[/yellow]")
+            continue
+        if file_count:
+            files_used += 1
+
+    merged = list(best.values())
+    deduped = total_raw - len(merged)
+
+    if output is None:
+        now = datetime.now(timezone.utc)
+        output = data_dir / f"merged_{now.strftime('%Y-%m-%d')}_last{days}d.ndjson"
+
+    output.parent.mkdir(parents=True, exist_ok=True)
+    with output.open("w") as f:
+        for d in merged:
+            f.write(json.dumps(d) + "\n")
+
+    table = Table(title=f"Merged Window: last {days} day(s)", show_header=True)
+    table.add_column("Source")
+    table.add_column("Unique listings", justify="right")
+    table.add_column("With cert", justify="right")
+    table.add_column("With grade", justify="right")
+    for source, count in sorted(Counter(d["source"] for d in merged).items()):
+        src_rows = [d for d in merged if d["source"] == source]
+        with_cert  = sum(1 for d in src_rows if d.get("cert_number"))
+        with_grade = sum(1 for d in src_rows if d.get("grade"))
+        table.add_row(source, str(count),
+                      f"{with_cert} ({100*with_cert//max(count,1)}%)",
+                      f"{with_grade} ({100*with_grade//max(count,1)}%)")
+    rprint(table)
+    rprint(Panel(
+        f"[bold green]{files_used} snapshot file(s) · {total_raw} raw rows · "
+        f"{deduped} deduplicated · {len(merged)} unique listings → {output}[/bold green]"
+    ))
+
+
 def main() -> None:
+    # Dispatch "merge" subcommand before the main fetch parser so that
+    # the existing fetch interface (bare flags, no subcommand) stays unchanged.
+    if len(sys.argv) > 1 and sys.argv[1] == "merge":
+        _merge_main(sys.argv[2:])
+        return
+    _fetch_main(sys.argv[1:])
+
+
+def _fetch_main(argv: list[str]) -> None:
     parser = argparse.ArgumentParser(
-        description="Marketplace Aggregator — active OTC listing aggregator for graded and raw trading cards",
+        prog="pokemon_tcg_marketplace_aggregator",
+        description="Fetch active OTC listings from all configured sources.",
     )
     parser.add_argument(
         "--sources",
         default=",".join(DEFAULT_SOURCES),
-        help=f"Comma-separated sources. Available: {', '.join(ALL_SOURCES)}. Default excludes 'alt' (see ToS note).",
+        help=f"Comma-separated sources. Available: {', '.join(ALL_SOURCES)}.",
     )
     parser.add_argument(
         "--max-pages",
@@ -106,7 +201,7 @@ def main() -> None:
         type=Path,
         help="Output NDJSON path. Default: ./data/{date}/snapshot_{time}.ndjson",
     )
-    args = parser.parse_args()
+    args = parser.parse_args(argv)
 
     sources = [s.strip() for s in args.sources.split(",") if s.strip()]
 
@@ -117,6 +212,37 @@ def main() -> None:
         output = Path("data") / now.strftime("%Y-%m-%d") / f"snapshot_{now.strftime('%H-%M-%S')}.ndjson"
 
     run(sources, output, max_pages=args.max_pages)
+
+
+def _merge_main(argv: list[str]) -> None:
+    parser = argparse.ArgumentParser(
+        prog="pokemon_tcg_marketplace_aggregator merge",
+        description=(
+            "Merge all snapshots from the past N days into one deduped NDJSON. "
+            "Dedup key is (source, cert_number) where available, else (source, listing_id). "
+            "For each card the most-recent fetched_at observation wins."
+        ),
+    )
+    parser.add_argument(
+        "--days",
+        type=int,
+        default=7,
+        help="Rolling window in days (default: 7).",
+    )
+    parser.add_argument(
+        "--data-dir",
+        type=Path,
+        default=Path("data"),
+        help="Directory containing dated snapshot subdirectories (default: ./data).",
+    )
+    parser.add_argument(
+        "--output",
+        type=Path,
+        default=None,
+        help="Output path. Default: {data-dir}/merged_{date}_last{days}d.ndjson",
+    )
+    args = parser.parse_args(argv)
+    merge(args.data_dir, args.days, args.output)
 
 
 if __name__ == "__main__":

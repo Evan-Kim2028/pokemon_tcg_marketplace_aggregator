@@ -62,6 +62,33 @@ To cap pages for a fast sanity check across all sources:
 uv run pokemon_tcg_marketplace_aggregator --max-pages 2 --output /tmp/snapshot.ndjson
 ```
 
+## Building a rolling dataset with `merge`
+
+All sources return current live listings — there is no historical API. To build a multi-day sample, run the aggregator on a schedule and use `merge` to collapse the snapshots into one deduped file.
+
+**Run on a schedule** (cron example — every 4 hours):
+
+```
+0 */4 * * * cd /path/to/repo && uv run pokemon_tcg_marketplace_aggregator
+```
+
+**Merge the last 7 days into one file:**
+
+```bash
+uv run pokemon_tcg_marketplace_aggregator merge --days 7
+# → ./data/merged_YYYY-MM-DD_last7d.ndjson
+```
+
+Options:
+
+```
+--days N          Rolling window in days (default: 7)
+--data-dir PATH   Where snapshots live (default: ./data)
+--output PATH     Output path (default: data/merged_{date}_last{N}d.ndjson)
+```
+
+Deduplication uses `(source, cert_number)` as the stable identity for graded cards (cert numbers are globally unique per slab). For the few sources without certs it falls back to `(source, listing_id)`. When the same card appears in multiple snapshots, the most recent price and `fetched_at` are kept — stale snapshots are naturally overwritten as cards reprice or sell.
+
 ## Rate limits and `--max-pages`
 
 `--max-pages N` caps each paginated source at N pages and is the primary tool for controlling request volume.

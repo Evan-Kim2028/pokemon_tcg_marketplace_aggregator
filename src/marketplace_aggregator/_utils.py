@@ -6,7 +6,7 @@ import time
 import httpx
 
 _GRADER_GRADE_RE = re.compile(
-    r"\b(PSA|BGS|CGC|SGC|HGA|CSG|PCA|GMA)\s+(\d+(?:\.\d+)?)\s*$",
+    r"\b(PSA|BGS|CGC|SGC|HGA|CSG|PCA|GMA|TAG)\s+(\d+(?:\.\d+)?)\s*$",
     re.IGNORECASE,
 )
 
