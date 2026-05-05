@@ -5,7 +5,7 @@ from collections.abc import Iterator
 
 import httpx
 
-from marketplace_aggregator._utils import retry_get
+from marketplace_aggregator._utils import parse_grade_from_name, retry_get
 from marketplace_aggregator.models import OTCListing
 
 ME_LISTINGS_URL = "https://api-mainnet.magiceden.dev/v2/collections/collector_crypt/listings"
@@ -42,12 +42,19 @@ def _normalize(listing: dict, sol_usd: float) -> OTCListing:
     name = token.get("name") or ""
     price_sol = listing.get("price")
 
-    # "GEM MINT 10" / "NEAR MINT 9" — last token is the grade value
+    # "GEM MINT 10" / "NEAR MINT 9" — last token is the grade value.
+    # For BGS slabs some NFTs encode only the sub-qualifier "+" with no number;
+    # fall back to parsing the grade out of the card name in that case.
+    card_name_for_fallback = _attr(attrs, "Card Name") or name
     grade_raw = _attr(attrs, "The Grade")
     grade: str | None = None
     if grade_raw:
         parts = grade_raw.split()
-        grade = parts[-1] if parts else grade_raw
+        last = parts[-1] if parts else grade_raw
+        if last == "+":
+            _, grade = parse_grade_from_name(card_name_for_fallback)
+        else:
+            grade = last
 
     grader = _attr(attrs, "Grading Company")
     if grader:

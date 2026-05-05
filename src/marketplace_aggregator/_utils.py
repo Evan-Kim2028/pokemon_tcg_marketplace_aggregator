@@ -14,9 +14,16 @@ _GRADE_NUMERIC_RE = re.compile(r"^(\d+(?:\.\d+)?)\b")
 
 # Known text-only grade labels → normalized value
 _GRADE_TEXT_MAP: dict[str, str] = {
-    "gm10": "10",       # CGC Gem Mint 10
-    "pristine": "10",   # CGC / BGS Pristine
+    "gm10": "10",        # CGC Gem Mint 10
+    "pristine": "10",    # CGC / BGS Pristine
     "10 pristine": "10",
+    "gem mint": "10",    # BGS Gem Mint 10 label without number
+    "gem mint 10": "10",
+    "mint": "9",         # BGS/PSA Mint label = grade 9
+    "near mint+": "8.5", # BGS Near Mint+ label = 8.5
+    "near mint": "8",    # BGS Near Mint label = 8
+    "excellent+": "6",   # BGS Excellent+ = 6
+    "nm/mt+": "8.5",     # SGC Near Mint-Mint+ label
     "authentic": "Auth",
 }
 
