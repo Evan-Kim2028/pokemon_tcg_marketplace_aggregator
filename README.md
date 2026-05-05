@@ -24,7 +24,7 @@ That's it. uv manages the virtualenv and all dependencies automatically.
 ## Getting started
 
 ```bash
-git clone https://github.com/your-org/marketplace_aggregator
+git clone https://github.com/Evan-Kim2028/marketplace_aggregator
 cd marketplace_aggregator
 uv sync
 ```
