@@ -3,6 +3,8 @@ from __future__ import annotations
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
 
+from marketplace_aggregator._utils import normalize_grade, normalize_grader
+
 
 @dataclass
 class OTCListing:
@@ -24,6 +26,14 @@ class OTCListing:
     fetched_at: str = field(
         default_factory=lambda: datetime.now(timezone.utc).isoformat(),
     )
+
+    def __post_init__(self) -> None:
+        if self.grade is not None:
+            self.grade = normalize_grade(self.grade)
+        if self.grader is not None:
+            self.grader = normalize_grader(self.grader)
+        if self.franchise is not None:
+            self.franchise = self.franchise.lower().replace(" ", "_")
 
     def to_dict(self) -> dict:
         return asdict(self)

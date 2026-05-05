@@ -12,7 +12,7 @@ BASE_URL = "https://api.ready.cards/api/v1/nft/listNftForUser"
 
 
 def _normalize(doc: dict) -> OTCListing:
-    nft_id = str(doc.get("id") or doc.get("tokenId") or "")
+    nft_id = str(doc.get("id") or doc.get("tokenId") or doc.get("certNumber") or "")
     listing_price = doc.get("listingPrice")
     market_price = doc.get("marketPrice") or doc.get("fmv")
     name = doc.get("name") or doc.get("title", "")
