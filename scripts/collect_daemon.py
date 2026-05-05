@@ -23,7 +23,6 @@ UV_BIN = shutil.which("uv") or UV
 def log(msg: str) -> None:
     ts = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
     line = f"[{ts}] {msg}"
-    print(line, flush=True)
     LOG_FILE.parent.mkdir(parents=True, exist_ok=True)
     with LOG_FILE.open("a") as f:
         f.write(line + "\n")
