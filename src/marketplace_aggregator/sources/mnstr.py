@@ -4,6 +4,7 @@ from collections.abc import Iterator
 
 import httpx
 
+from marketplace_aggregator._utils import retry_get
 from marketplace_aggregator.models import OTCListing
 
 COLLECTION_URL = "https://api.mnstr.xyz/mnstr/collection"
@@ -59,8 +60,7 @@ def _normalize(item: dict) -> OTCListing:
 
 
 def fetch(client: httpx.Client, **_kwargs) -> Iterator[OTCListing]:
-    resp = client.get(COLLECTION_URL, headers={"Accept": "application/json"})
-    resp.raise_for_status()
+    resp = retry_get(client, COLLECTION_URL, headers={"Accept": "application/json"})
     body = resp.json()
     items = body.get("data") or body.get("items") or (body if isinstance(body, list) else [])
     for item in items:

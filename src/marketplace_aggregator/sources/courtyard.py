@@ -9,6 +9,7 @@ from pathlib import Path
 import httpx
 from rich import print as rprint
 
+from marketplace_aggregator._utils import retry_get
 from marketplace_aggregator.models import OTCListing
 
 CONTRACT = "0x251be3a17af4892035c37ebf5890f4a4d889dcad"
@@ -115,8 +116,7 @@ def fetch(client: httpx.Client, max_pages: int | None = None) -> Iterator[OTCLis
             params: dict = {"limit": 100}
             if cursor:
                 params["next"] = cursor
-            resp = client.get(LISTINGS_URL, params=params, headers=os_headers)
-            resp.raise_for_status()
+            resp = retry_get(client, LISTINGS_URL, params=params, headers=os_headers)
             body = resp.json()
             listings = body.get("listings", [])
             cursor = body.get("next")
@@ -138,6 +138,11 @@ def fetch(client: httpx.Client, max_pages: int | None = None) -> Iterator[OTCLis
                     hits += 1
                 else:
                     r2 = client.get(f"{NFT_URL}/{token_id}", headers=os_headers, timeout=20)
+                    for _attempt in range(3):
+                        if r2.status_code != 429:
+                            break
+                        time.sleep(5 * 2 ** _attempt)
+                        r2 = client.get(f"{NFT_URL}/{token_id}", headers=os_headers, timeout=20)
                     if r2.status_code != 200:
                         continue
                     nft_data = r2.json().get("nft") or r2.json()

@@ -6,7 +6,7 @@ from collections.abc import Iterator
 
 import httpx
 
-from marketplace_aggregator._utils import infer_franchise
+from marketplace_aggregator._utils import infer_franchise, retry_get
 from marketplace_aggregator.models import OTCListing
 
 BASE_URL = "https://www.renaiss.xyz/api/trpc/collectible.list"
@@ -70,8 +70,7 @@ def fetch(client: httpx.Client, max_pages: int | None = None) -> Iterator[OTCLis
             "sortOrder": "desc",
             "listedOnly": True,
         }})
-        resp = client.get(BASE_URL, params={"input": input_json}, headers={"Accept": "application/json"})
-        resp.raise_for_status()
+        resp = retry_get(client, BASE_URL, params={"input": input_json}, headers={"Accept": "application/json"})
         collection = resp.json().get("result", {}).get("data", {}).get("json", {}).get("collection", [])
         if not collection:
             break

@@ -5,7 +5,7 @@ from collections.abc import Iterator
 
 import httpx
 
-from marketplace_aggregator._utils import infer_franchise, parse_grade_from_name
+from marketplace_aggregator._utils import infer_franchise, parse_grade_from_name, retry_get
 from marketplace_aggregator.models import OTCListing
 
 ACTIVITY_URL = "https://api.beezie.com/activity"
@@ -48,8 +48,7 @@ def fetch(client: httpx.Client, max_pages: int | None = None) -> Iterator[OTCLis
     page = 1
     limit = 50
     while True:
-        resp = client.get(ACTIVITY_URL, params={"limit": limit, "page": page}, headers={"Accept": "application/json"})
-        resp.raise_for_status()
+        resp = retry_get(client, ACTIVITY_URL, params={"limit": limit, "page": page}, headers={"Accept": "application/json"})
         body = resp.json()
         events = body.get("activity") or (body if isinstance(body, list) else [])
         if not events:

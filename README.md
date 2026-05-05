@@ -1,6 +1,6 @@
-# marketplace_aggregator
+# pokemon_tcg_marketplace_aggregator
 
-Active OTC listing aggregator for graded and raw trading cards across web3 and crypto-native marketplaces.
+Pokemon TCG OTC listing aggregator for graded cards across web3 and crypto-native marketplaces.
 
 Fetches open asks (buy-now listings) from multiple platforms, normalizes them into a unified schema, and writes NDJSON output. Designed for 4-hour cadence runs.
 
@@ -24,15 +24,15 @@ That's it. uv manages the virtualenv and all dependencies automatically.
 ## Getting started
 
 ```bash
-git clone https://github.com/Evan-Kim2028/marketplace_aggregator
-cd marketplace_aggregator
+git clone https://github.com/Evan-Kim2028/pokemon_tcg_marketplace_aggregator
+cd pokemon_tcg_marketplace_aggregator
 uv sync
 ```
 
 **Get graded card data in ~10 seconds — no API key needed** (7 of 8 sources require none):
 
 ```bash
-uv run marketplace_aggregator --sources collector_crypt --max-pages 1 --output /tmp/test.ndjson
+uv run pokemon_tcg_marketplace_aggregator --sources collector_crypt --max-pages 1 --output /tmp/test.ndjson
 ```
 
 Inspect what came back:
@@ -51,7 +51,7 @@ jq -r '[.card_name, .grader, .grade, .ask_usd] | @tsv' /tmp/test.ndjson \
 7 of the 8 sources need no credentials. `courtyard` requires an OpenSea key but skips cleanly with a warning if none is set. Run them all at once:
 
 ```bash
-uv run marketplace_aggregator
+uv run pokemon_tcg_marketplace_aggregator
 ```
 
 That runs all 8 sources (`renaiss`, `beezie`, `ready`, `mnstr`, `playkami`, `collector_crypt`, `phygitals`, `courtyard`). Courtyard will print a yellow "skipping" message and yield nothing if `OPENSEA_API_KEY` is unset — every other source proceeds normally.
@@ -59,8 +59,32 @@ That runs all 8 sources (`renaiss`, `beezie`, `ready`, `mnstr`, `playkami`, `col
 To cap pages for a fast sanity check across all sources:
 
 ```bash
-uv run marketplace_aggregator --max-pages 2 --output /tmp/snapshot.ndjson
+uv run pokemon_tcg_marketplace_aggregator --max-pages 2 --output /tmp/snapshot.ndjson
 ```
+
+## Rate limits and `--max-pages`
+
+`--max-pages N` caps each paginated source at N pages and is the primary tool for controlling request volume.
+
+| Source | Page size | Full run safe? | Notes |
+|---|---|:---:|---|
+| `collector_crypt`, `phygitals` | 100 | Yes | Magic Eden public API; ~200 ms between pages. |
+| `renaiss`, `beezie` | 50 | Yes | Custom APIs; ~150 ms between pages. |
+| `ready` | 1000 | Yes | Large pages = very few requests even for a full inventory. |
+| `courtyard` | 100 + 1 per new NFT | Slow first run | Trait-cache misses drive request count. Warms after the first full run; subsequent runs are fast. |
+| `mnstr`, `playkami` | Single request | Yes | No pagination — `--max-pages` has no effect. |
+
+**What happens on a 429:** All sources retry up to 3 times with exponential back-off (5 s → 10 s → 20 s). If all retries are exhausted the source errors out and the CLI logs it — all other sources continue normally.
+
+**Recommended settings:**
+
+| Goal | Command |
+|---|---|
+| Quick sanity check | `--max-pages 1` (~seconds, ~40–200 listings per source) |
+| Fast broad sweep | `--max-pages 5` (~1–2 minutes total) |
+| Full inventory | omit `--max-pages` (runs until no more pages) |
+
+Courtyard on a cold cache can take 5–10 minutes on the first full run as it fetches traits for each token. The cache at `~/.cache/marketplace_aggregator/courtyard_traits.json` eliminates that overhead on all subsequent runs.
 
 ## Enabling Courtyard (OpenSea key)
 
@@ -69,7 +93,7 @@ cp .env.example .env
 # edit .env and set OPENSEA_API_KEY=your_key_here
 
 uv sync --extra dotenv          # installs python-dotenv so .env loads automatically
-uv run marketplace_aggregator   # now includes courtyard
+uv run pokemon_tcg_marketplace_aggregator   # now includes courtyard
 ```
 
 ## Working with the output

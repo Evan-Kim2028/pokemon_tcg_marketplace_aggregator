@@ -5,6 +5,7 @@ from collections.abc import Iterator
 
 import httpx
 
+from marketplace_aggregator._utils import retry_get
 from marketplace_aggregator.models import OTCListing
 
 ME_LISTINGS_URL = "https://api-mainnet.magiceden.dev/v2/collections/collector_crypt/listings"
@@ -86,8 +87,7 @@ def fetch(client: httpx.Client, max_pages: int | None = None) -> Iterator[OTCLis
     limit = 100
     page = 0
     while True:
-        resp = client.get(ME_LISTINGS_URL, params={"offset": offset, "limit": limit})
-        resp.raise_for_status()
+        resp = retry_get(client, ME_LISTINGS_URL, params={"offset": offset, "limit": limit})
         listings = resp.json()
         if not listings:
             break

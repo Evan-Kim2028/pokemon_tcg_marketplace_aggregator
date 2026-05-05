@@ -1,7 +1,7 @@
 [project]
-name = "marketplace_aggregator"
+name = "pokemon_tcg_marketplace_aggregator"
 version = "0.1.0"
-description = "Active OTC listing aggregator for graded and raw trading cards"
+description = "Pokemon TCG OTC listing aggregator for graded cards across web3 marketplaces"
 requires-python = ">=3.10"
 license = { text = "MIT" }
 dependencies = [
@@ -16,7 +16,7 @@ courtyard = []
 dotenv = ["python-dotenv>=1.0"]
 
 [project.scripts]
-marketplace_aggregator = "marketplace_aggregator.cli:main"
+pokemon_tcg_marketplace_aggregator = "marketplace_aggregator.cli:main"
 
 [build-system]
 requires = ["hatchling"]

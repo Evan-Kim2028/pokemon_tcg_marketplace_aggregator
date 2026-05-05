@@ -5,7 +5,7 @@ from collections.abc import Iterator
 
 import httpx
 
-from marketplace_aggregator._utils import infer_franchise
+from marketplace_aggregator._utils import infer_franchise, retry_get
 from marketplace_aggregator.models import OTCListing
 
 BASE_URL = "https://api.ready.cards/api/v1/nft/listNftForUser"
@@ -39,8 +39,7 @@ def fetch(client: httpx.Client, max_pages: int | None = None) -> Iterator[OTCLis
     page = 1
     limit = 1000
     while True:
-        resp = client.get(BASE_URL, params={"limit": limit, "page": page}, headers={"Accept": "application/json"})
-        resp.raise_for_status()
+        resp = retry_get(client, BASE_URL, params={"limit": limit, "page": page}, headers={"Accept": "application/json"})
         body = resp.json()
         docs = body.get("result", {}).get("docs") or body.get("docs") or body.get("data") or []
         if isinstance(body, list):
