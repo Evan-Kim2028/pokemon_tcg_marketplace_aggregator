@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 import time
 from collections.abc import Iterator
 
@@ -10,6 +11,13 @@ from marketplace_aggregator._utils import infer_franchise, retry_get
 from marketplace_aggregator.models import OTCListing
 
 BASE_URL = "https://www.renaiss.xyz/api/trpc/collectible.list"
+
+# Renaiss item names are prefixed with the grade label, e.g.:
+# "PSA 10 Gem Mint 2024 Pokemon ..." → strip to "2024 Pokemon ..."
+_NAME_PREFIX_RE = re.compile(
+    r"^(?:PSA|CGC|BGS|SGC|HGA|TAG)\s+[\d.]+(?:\s+[A-Za-z][A-Za-z+\-]*)*\s+(?=\d{4}\b)",
+    re.IGNORECASE,
+)
 
 
 def _normalize(item: dict) -> OTCListing:
@@ -30,6 +38,12 @@ def _normalize(item: dict) -> OTCListing:
         except (ValueError, TypeError):
             pass
 
+    # Null out obviously bad USDT prices (seller mis-entered amount in wei).
+    if ask_usd is not None and ask_usd > 1_000_000:
+        ask_usd = None
+    elif ask_usd is not None and insured_usd and insured_usd > 0 and ask_usd / insured_usd > 1000:
+        ask_usd = None
+
     cert_number: str | None = None
     for attr in item.get("attributes") or []:
         if attr.get("trait") == "Serial":
@@ -38,11 +52,14 @@ def _normalize(item: dict) -> OTCListing:
                 cert_number = parts[-1].strip()
             break
 
+    raw_name = item.get("name") or ""
+    card_name = _NAME_PREFIX_RE.sub("", raw_name) or raw_name
+
     item_id = str(item.get("id", ""))
     return OTCListing(
         source="renaiss",
         listing_id=item_id,
-        card_name=item.get("name", ""),
+        card_name=card_name,
         set_name=None,
         card_number=None,
         grade=str(item["grade"]) if item.get("grade") is not None else None,
@@ -53,7 +70,7 @@ def _normalize(item: dict) -> OTCListing:
         insured_usd=insured_usd,
         listing_url=f"https://www.renaiss.xyz/collectible/{item_id}" if item_id else None,
         image_url=item.get("imageUrl") or item.get("image"),
-        franchise=infer_franchise(item.get("name", "")),
+        franchise=infer_franchise(card_name),
         listed_at=item.get("listDate") or item.get("createdAt"),
     )
 
@@ -75,7 +92,10 @@ def fetch(client: httpx.Client, max_pages: int | None = None) -> Iterator[OTCLis
         if not collection:
             break
         for item in collection:
-            yield _normalize(item)
+            listing = _normalize(item)
+            if listing.franchise is not None and listing.franchise != "pokemon":
+                continue
+            yield listing
         offset += limit
         page += 1
         if len(collection) < limit:

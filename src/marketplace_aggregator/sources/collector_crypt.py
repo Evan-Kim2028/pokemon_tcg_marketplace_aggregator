@@ -32,7 +32,13 @@ def _attr(attrs: list[dict], trait: str) -> str | None:
     for a in attrs:
         if a.get("trait_type") == trait:
             v = a.get("value")
-            return str(v) if v is not None else None
+            if v is None:
+                return None
+            # Large integer cert numbers come back as JSON floats (e.g. 1401040000000.0).
+            # str() on a Python float gives scientific notation, breaking dedup key matching.
+            if isinstance(v, float) and v == int(v):
+                return str(int(v))
+            return str(v)
     return None
 
 
@@ -68,6 +74,15 @@ def _normalize(listing: dict, sol_usd: float) -> OTCListing:
         except (ValueError, TypeError):
             pass
 
+    ask_usd = price_sol * sol_usd if price_sol is not None else None
+    # Null out obviously bad prices: ask > $1M or ask/insured > 1000.
+    # Sellers occasionally list in absurd SOL amounts (fat-finger, troll listings).
+    # insured_usd is the seller-declared card value and a useful sanity anchor.
+    if ask_usd is not None and ask_usd > 1_000_000:
+        ask_usd = None
+    elif ask_usd is not None and insured_usd and insured_usd > 0 and ask_usd / insured_usd > 1000:
+        ask_usd = None
+
     token_addr = listing.get("tokenAddress") or ""
     return OTCListing(
         source="collector_crypt",
@@ -78,7 +93,7 @@ def _normalize(listing: dict, sol_usd: float) -> OTCListing:
         grade=grade,
         grader=grader,
         cert_number=_attr(attrs, "Grading ID"),
-        ask_usd=price_sol * sol_usd if price_sol is not None else None,
+        ask_usd=ask_usd,
         bid_usd=None,
         insured_usd=insured_usd,
         listing_url=f"https://magiceden.io/item-details/{token_addr}" if token_addr else None,

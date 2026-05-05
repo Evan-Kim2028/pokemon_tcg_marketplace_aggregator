@@ -4,7 +4,7 @@ from collections.abc import Iterator
 
 import httpx
 
-from marketplace_aggregator._utils import retry_get
+from marketplace_aggregator._utils import infer_franchise, retry_get
 from marketplace_aggregator.models import OTCListing
 
 COLLECTION_URL = "https://api.mnstr.xyz/mnstr/collection"
@@ -36,14 +36,13 @@ def _normalize(item: dict) -> OTCListing:
         parts = str(raw_grading).split()
         grade = parts[-1] if len(parts) > 1 else raw_grading
 
-    franchise = item.get("category") or (
-        "pokemon" if "pokemon" in (item.get("title") or "").lower() else None
-    )
+    title = item.get("title") or item.get("name") or ""
+    franchise = item.get("category") or infer_franchise(title)
 
     return OTCListing(
         source="mnstr",
         listing_id=str(item.get("remoteId") or slug or ""),
-        card_name=item.get("title") or item.get("name", ""),
+        card_name=title or item.get("name", ""),
         set_name=item.get("set"),
         card_number=item.get("cardNumber"),
         grade=grade,
@@ -65,4 +64,7 @@ def fetch(client: httpx.Client, **_kwargs) -> Iterator[OTCListing]:
     items = body.get("data") or body.get("items") or (body if isinstance(body, list) else [])
     for item in items:
         if item.get("canBeSold") and item.get("listPriceUsd") is not None:
-            yield _normalize(item)
+            listing = _normalize(item)
+            if listing.franchise is not None and listing.franchise != "pokemon":
+                continue
+            yield listing

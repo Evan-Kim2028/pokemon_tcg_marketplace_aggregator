@@ -84,4 +84,7 @@ def fetch(client: httpx.Client, **_kwargs) -> Iterator[OTCListing]:
     for item in items:
         meta = item.get("metadata") or {}
         if meta.get("product_type") == "GRADED_CARD":
-            yield _normalize(item)
+            listing = _normalize(item)
+            if listing.franchise is not None and listing.franchise != "pokemon":
+                continue
+            yield listing

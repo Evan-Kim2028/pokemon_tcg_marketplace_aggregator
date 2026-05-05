@@ -55,7 +55,10 @@ def fetch(client: httpx.Client, max_pages: int | None = None) -> Iterator[OTCLis
             break
         for event in events:
             if event.get("type") == "order_created" and event.get("to") is None:
-                yield _normalize(event)
+                listing = _normalize(event)
+                if listing.franchise is not None and listing.franchise != "pokemon":
+                    continue
+                yield listing
         if len(events) < limit:
             break
         if max_pages and page >= max_pages:
