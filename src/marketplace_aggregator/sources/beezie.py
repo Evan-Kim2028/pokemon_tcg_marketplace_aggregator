@@ -5,6 +5,8 @@ from collections.abc import Iterator
 
 import httpx
 
+import re
+
 from marketplace_aggregator._utils import infer_franchise, parse_grade_from_name, retry_get
 from marketplace_aggregator.models import OTCListing
 
@@ -14,10 +16,14 @@ ACTIVITY_URL = "https://api.beezie.com/activity"
 # order_created + to=None events represent currently open asks.
 # Grade/grader are parsed from the name string (e.g. "... PSA 10").
 
+_CARD_NUM_RE = re.compile(r"#([\w]+(?:/\d+)?)")
+
 
 def _normalize(event: dict) -> OTCListing:
     name = event.get("name", "")
     grader, grade = parse_grade_from_name(name)
+    cn_match = _CARD_NUM_RE.search(name)
+    card_number = cn_match.group(1) if cn_match else None
     ask_usd: float | None = None
     raw_amount = event.get("amount")
     if raw_amount is not None:
@@ -30,7 +36,7 @@ def _normalize(event: dict) -> OTCListing:
         listing_id=str(event.get("tokenId") or event.get("id", "")),
         card_name=name,
         set_name=None,
-        card_number=None,
+        card_number=card_number,
         grade=grade,
         grader=grader,
         cert_number=None,

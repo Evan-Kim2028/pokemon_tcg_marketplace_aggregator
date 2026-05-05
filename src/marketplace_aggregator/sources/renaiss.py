@@ -19,6 +19,9 @@ _NAME_PREFIX_RE = re.compile(
     re.IGNORECASE,
 )
 
+# Card number from name: "... #148 Squirtle" or "... #GG38 Suicune" or "... #RC24/198"
+_CARD_NUM_RE = re.compile(r"#([\w]+(?:/\d+)?)")
+
 
 def _normalize(item: dict) -> OTCListing:
     ask_usd: float | None = None
@@ -54,6 +57,8 @@ def _normalize(item: dict) -> OTCListing:
 
     raw_name = item.get("name") or ""
     card_name = _NAME_PREFIX_RE.sub("", raw_name) or raw_name
+    cn_match = _CARD_NUM_RE.search(card_name)
+    card_number = cn_match.group(1) if cn_match else None
 
     item_id = str(item.get("id", ""))
     return OTCListing(
@@ -61,7 +66,7 @@ def _normalize(item: dict) -> OTCListing:
         listing_id=item_id,
         card_name=card_name,
         set_name=None,
-        card_number=None,
+        card_number=card_number,
         grade=str(item["grade"]) if item.get("grade") is not None else None,
         grader=item.get("gradingCompany"),
         cert_number=cert_number,

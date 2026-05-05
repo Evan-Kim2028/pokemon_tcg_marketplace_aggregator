@@ -36,6 +36,50 @@ _GRADER_ALIASES: dict[str, str] = {
 # One Piece set/card-number patterns used by infer_franchise
 _ONE_PIECE_RE = re.compile(r"\bop\d{2}-", re.IGNORECASE)
 
+# Pokemon character names that commonly appear in graded card names without the
+# word "pokemon" — used as a secondary franchise signal in infer_franchise.
+_POKEMON_NAMES: frozenset[str] = frozenset({
+    "pikachu", "charizard", "mewtwo", "mew", "eevee", "gengar", "snorlax",
+    "gyarados", "raichu", "bulbasaur", "squirtle", "venusaur", "blastoise",
+    "alakazam", "machamp", "golem", "arcanine", "lapras", "vaporeon",
+    "jolteon", "flareon", "espeon", "umbreon", "leafeon", "glaceon", "sylveon",
+    "dragonite", "articuno", "zapdos", "moltres", "ditto", "jigglypuff",
+    "clefairy", "ninetales", "magneton", "haunter", "electabuzz", "magmar",
+    "tauros", "chansey", "kangaskhan", "starmie", "scyther", "jynx",
+    "electivire", "magmortar", "lugia", "ho-oh", "togepi", "espeon",
+    "suicune", "raikou", "entei", "celebi", "tyranitar",
+    "treecko", "torchic", "mudkip", "blaziken", "swampert", "sceptile",
+    "gardevoir", "absol", "rayquaza", "deoxys", "kyogre", "groudon",
+    "latias", "latios", "jirachi", "turtwig", "chimchar", "piplup",
+    "lucario", "garchomp", "luxray", "togekiss", "leafeon", "glaceon",
+    "dialga", "palkia", "giratina", "arceus", "darkrai", "shaymin",
+    "snivy", "tepig", "oshawott", "samurott", "emboar", "serperior",
+    "zoroark", "reshiram", "zekrom", "kyurem", "genesect", "victini",
+    "chespin", "fennekin", "froakie", "greninja", "sylveon", "xerneas",
+    "yveltal", "zygarde", "diancie", "hoopa", "volcanion",
+    "rowlet", "litten", "popplio", "decidueye", "incineroar", "primarina",
+    "cosmog", "lunala", "solgaleo", "nihilego", "necrozma",
+    "grookey", "scorbunny", "sobble", "zacian", "zamazenta", "eternatus",
+    "calyrex", "urshifu", "kubfu",
+    "sprigatito", "fuecoco", "quaxly", "koraidon", "miraidon",
+    "ting-lu", "chien-pao", "wo-chien", "chi-yu",
+    "steelix", "slowking", "magikarp", "milotic", "ivysaur", "haunter",
+    "onix", "voltorb", "electrode", "hitmonlee", "hitmonchan", "porygon",
+    "kabuto", "aerodactyl", "omanyte", "mewtwo", "nidoking", "nidoqueen",
+    "clefable", "wigglytuff", "poliwrath", "kadabra", "rapidash", "dodrio",
+    "dewgong", "muk", "cloyster", "hypno", "kingler", "exeggutor",
+    "marowak", "lickitung", "weezing", "rhydon", "tangela", "seadra",
+    "seaking", "starmie", "mr. mime", "scyther", "electabuzz", "pinsir",
+    "tauros", "magikarp", "gyarados", "lapras", "vaporeon", "jolteon",
+    "dragonair", "dragonite", "togetic", "flaaffy", "ampharos",
+    "bellossom", "marill", "sudowoodo", "politoed", "jumpluff", "yanma",
+    "quagsire", "misdreavus", "wobbuffet", "scizor", "heracross",
+    "sneasel", "teddiursa", "slugma", "swinub", "corsola", "octillery",
+    "delibird", "mantine", "skarmory", "houndoom", "kingdra", "stantler",
+    "smeargle", "tyrogue", "miltank", "blissey", "raikou", "entei",
+    "lugia", "ho-oh", "celebi",
+})
+
 
 def infer_franchise(name: str, brand: str = "") -> str | None:
     lower = (name + " " + brand).lower()
@@ -45,6 +89,11 @@ def infer_franchise(name: str, brand: str = "") -> str | None:
         return "one_piece"
     if any(s in lower for s in ("baseball", "basketball", "football", "soccer", "nfl", "nba", "mlb")):
         return "sports"
+    # Secondary: well-known Pokemon character names that appear without "pokemon"
+    # in the string (common for set names like "Crown Zenith Lugia EX #17").
+    words = re.split(r"[\s\-./,]+", lower)
+    if any(w in _POKEMON_NAMES for w in words):
+        return "pokemon"
     return None
 
 
