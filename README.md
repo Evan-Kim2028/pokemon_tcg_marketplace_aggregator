@@ -1,15 +1,17 @@
 # pokemon_tcg_marketplace_aggregator
 
-Pokemon TCG OTC listing aggregator for graded cards across web3 and crypto-native marketplaces.
+Live OTC listings aggregator for graded Pokemon TCG cards across web3 and crypto-native marketplaces.
 
-Fetches open asks (buy-now listings) from multiple platforms, normalizes them into a unified schema, and writes NDJSON output. Designed for 4-hour cadence runs.
+**How it works:** Every 4 hours a cron job fetches all active buy-now listings from 7+ sources and writes a timestamped NDJSON snapshot to `./data/`. Run `merge` to collapse any window of snapshots into one deduped dataset. The longer it runs, the richer the picture.
+
+All sources are **live-only** — these platforms expose current inventory, not transaction history. There is no historical API to backfill from. The snapshot cadence *is* the history.
+
+---
 
 ## Prerequisites
 
 - **Python 3.10+** — check with `python3 --version`
-- **uv** — fast Python package/project manager
-
-Install uv (one command, no Python required first):
+- **uv** — fast Python package manager (manages virtualenv and deps automatically)
 
 ```bash
 # macOS / Linux
@@ -19,9 +21,9 @@ curl -LsSf https://astral.sh/uv/install.sh | sh
 powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.sh | iex"
 ```
 
-That's it. uv manages the virtualenv and all dependencies automatically.
+---
 
-## Getting started
+## Quick start
 
 ```bash
 git clone https://github.com/Evan-Kim2028/pokemon_tcg_marketplace_aggregator
@@ -29,57 +31,94 @@ cd pokemon_tcg_marketplace_aggregator
 uv sync
 ```
 
-**Get graded card data in ~10 seconds — no API key needed** (7 of 8 sources require none):
-
-```bash
-uv run pokemon_tcg_marketplace_aggregator --sources collector_crypt --max-pages 1 --output /tmp/test.ndjson
-```
-
-Inspect what came back:
-
-```bash
-# count by grader (PSA / BGS / CGC / raw)
-jq -r '.grader // "raw"' /tmp/test.ndjson | sort | uniq -c | sort -rn
-
-# top asks, highest first
-jq -r '[.card_name, .grader, .grade, .ask_usd] | @tsv' /tmp/test.ndjson \
-  | sort -t$'\t' -k4 -rn | head -20
-```
-
-## Running all sources
-
-7 of the 8 sources need no credentials. `courtyard` requires an OpenSea key but skips cleanly with a warning if none is set. Run them all at once:
+Run your first snapshot:
 
 ```bash
 uv run pokemon_tcg_marketplace_aggregator
 ```
 
-That runs all 8 sources (`renaiss`, `beezie`, `ready`, `mnstr`, `playkami`, `collector_crypt`, `phygitals`, `courtyard`). Courtyard will print a yellow "skipping" message and yield nothing if `OPENSEA_API_KEY` is unset — every other source proceeds normally.
+This fetches all 7 no-key-required sources and writes to `./data/{date}/snapshot_{time}.ndjson`. You'll see a summary table with listing counts, % with price, grade, and cert.
 
-To cap pages for a fast sanity check across all sources:
+Spot-check the output:
 
 ```bash
-uv run pokemon_tcg_marketplace_aggregator --max-pages 2 --output /tmp/snapshot.ndjson
+# count by grader across all sources
+jq -r '.grader // "raw"' data/**/*.ndjson | sort | uniq -c | sort -rn
+
+# top asks, highest price first
+jq -r '[.card_name, .grader, .grade, .ask_usd] | @tsv' data/**/*.ndjson \
+  | sort -t$'\t' -k4 -rn | head -20
 ```
+
+---
+
+## Setting up the 4-hour schedule
+
+This is the step that makes the tool useful. Without a schedule you have a single point-in-time snapshot. With a schedule you get price history, new listings over time, and enough volume for meaningful analysis.
+
+### Option A — background daemon (simplest)
+
+A daemon script is included. It runs a snapshot, sleeps 4 hours, repeats indefinitely:
+
+```bash
+# Start collecting (writes PID to data/daemon.pid, logs to data/cron.log)
+nohup uv run python scripts/collect_daemon.py >> data/cron.log 2>&1 &
+echo $! > data/daemon.pid
+
+# Watch it run
+tail -f data/cron.log
+
+# Stop it
+kill $(cat data/daemon.pid)
+```
+
+### Option B — cron (survives reboots)
+
+```bash
+# 1. Find your uv path
+which uv
+
+# 2. Open your crontab
+crontab -e
+
+# 3. Paste this line (replace paths with your actual values)
+0 */4 * * * cd /path/to/pokemon_tcg_marketplace_aggregator && /path/to/uv run pokemon_tcg_marketplace_aggregator >> data/cron.log 2>&1
+```
+
+Common path examples:
+
+```
+# macOS (Homebrew uv)
+0 */4 * * * cd ~/pokemon_tcg_marketplace_aggregator && /opt/homebrew/bin/uv run pokemon_tcg_marketplace_aggregator >> data/cron.log 2>&1
+
+# Linux
+0 */4 * * * cd ~/pokemon_tcg_marketplace_aggregator && ~/.local/bin/uv run pokemon_tcg_marketplace_aggregator >> data/cron.log 2>&1
+```
+
+After a few days `data/` looks like:
+
+```
+data/
+  2026-05-05/
+    snapshot_19-28-22.ndjson     ← first run
+    snapshot_23-28-10.ndjson
+  2026-05-06/
+    snapshot_03-28-08.ndjson
+    snapshot_07-28-14.ndjson
+    ...
+  cron.log
+```
+
+---
 
 ## Building a rolling dataset with `merge`
 
-All sources return current live listings — there is no historical API. To build a multi-day sample, run the aggregator on a schedule and use `merge` to collapse the snapshots into one deduped file.
-
-**Run on a schedule** (cron example — every 4 hours):
-
-```
-0 */4 * * * cd /path/to/repo && uv run pokemon_tcg_marketplace_aggregator
-```
-
-**Merge the last 7 days into one file:**
+Once you have multiple snapshots, collapse them into one deduped file:
 
 ```bash
 uv run pokemon_tcg_marketplace_aggregator merge --days 7
-# → ./data/merged_YYYY-MM-DD_last7d.ndjson
+# → data/merged_YYYY-MM-DD_last7d.ndjson
 ```
-
-Options:
 
 ```
 --days N          Rolling window in days (default: 7)
@@ -87,109 +126,104 @@ Options:
 --output PATH     Output path (default: data/merged_{date}_last{N}d.ndjson)
 ```
 
-Deduplication uses `(source, cert_number)` as the stable identity for graded cards (cert numbers are globally unique per slab). For the few sources without certs it falls back to `(source, listing_id)`. When the same card appears in multiple snapshots, the most recent price and `fetched_at` are kept — stale snapshots are naturally overwritten as cards reprice or sell.
+**How dedup works:** The stable identity for a graded card is its cert number (globally unique per physical slab). Dedup key is `(source, cert_number)` where cert exists, else `(source, listing_id)`. When the same card appears in multiple snapshots the most recent `fetched_at` wins, so prices stay current and sold cards naturally drop out as they stop appearing.
 
-## Rate limits and `--max-pages`
+A card that's listed for a week at one price will appear in 42 snapshots but only once in the merge output — at its latest observed price.
 
-`--max-pages N` caps each paginated source at N pages and is the primary tool for controlling request volume.
+---
 
-| Source | Page size | Full run safe? | Notes |
-|---|---|:---:|---|
-| `collector_crypt`, `phygitals` | 100 | Yes | Magic Eden public API; ~200 ms between pages. |
-| `renaiss`, `beezie` | 50 | Yes | Custom APIs; ~150 ms between pages. |
-| `ready` | 1000 | Yes | Large pages = very few requests even for a full inventory. |
-| `courtyard` | 100 + 1 per new NFT | Slow first run | Trait-cache misses drive request count. Warms after the first full run; subsequent runs are fast. |
-| `mnstr`, `playkami` | Single request | Yes | No pagination — `--max-pages` has no effect. |
+## Working with the data
 
-**What happens on a 429:** All sources retry up to 3 times with exponential back-off (5 s → 10 s → 20 s). If all retries are exhausted the source errors out and the CLI logs it — all other sources continue normally.
+Output is NDJSON — one JSON object per line. Works directly with jq, pandas, DuckDB.
 
-**Recommended settings:**
-
-| Goal | Command |
-|---|---|
-| Quick sanity check | `--max-pages 1` (~seconds, ~40–200 listings per source) |
-| Fast broad sweep | `--max-pages 5` (~1–2 minutes total) |
-| Full inventory | omit `--max-pages` (runs until no more pages) |
-
-Courtyard on a cold cache can take 5–10 minutes on the first full run as it fetches traits for each token. The cache at `~/.cache/marketplace_aggregator/courtyard_traits.json` eliminates that overhead on all subsequent runs.
-
-## Enabling Courtyard (OpenSea key)
+**jq:**
 
 ```bash
-cp .env.example .env
-# edit .env and set OPENSEA_API_KEY=your_key_here
+# all PSA 10s across every source
+jq 'select(.grader == "PSA" and .grade == "10")' data/merged_*.ndjson
 
-uv sync --extra dotenv          # installs python-dotenv so .env loads automatically
-uv run pokemon_tcg_marketplace_aggregator   # now includes courtyard
-```
-
-## Working with the output
-
-Output is NDJSON — one JSON object per line — written to `./data/{date}/snapshot_{time}.ndjson` by default (or `--output <path>`). The CLI also prints a summary table (listing count, % with price, grade, cert) after each run.
-
-**Filter with jq:**
-
-```bash
-# graded Pokemon cards only, sorted by ask price
-jq 'select(.franchise == "pokemon" and .grade != null)' snapshot.ndjson \
+# graded Pokemon only, sorted by ask price descending
+jq 'select(.franchise == "pokemon" and .grade != null)' data/merged_*.ndjson \
   | jq -r '[.grader, .grade, .ask_usd, .card_name] | @tsv' \
   | sort -t$'\t' -k3 -rn | head -30
-
-# all PSA 10s across every source
-jq 'select(.grader == "PSA" and .grade == "10")' snapshot.ndjson
 ```
 
-**Load into pandas:**
+**pandas:**
 
 ```python
 import pandas as pd
-df = pd.read_json("snapshot.ndjson", lines=True)
+
+df = pd.read_json("data/merged_2026-05-05_last7d.ndjson", lines=True)
 print(df.groupby(["source", "grader"])["ask_usd"].describe())
+print(df[df.grade == "10"].sort_values("ask_usd", ascending=False).head(20))
 ```
 
-**Query with DuckDB (no import step):**
+**DuckDB (no import step, queries ndjson directly):**
 
 ```sql
--- install once: pip install duckdb
-SELECT source, grader, COUNT(*) AS listings, AVG(ask_usd) AS avg_ask
-FROM read_ndjson_auto('snapshot.ndjson')
+SELECT source, grader, COUNT(*) AS listings, ROUND(AVG(ask_usd), 2) AS avg_ask
+FROM read_ndjson_auto('data/merged_*.ndjson')
 WHERE franchise = 'pokemon'
 GROUP BY 1, 2
 ORDER BY 3 DESC;
 ```
 
-## Supported sources
+---
 
-| Key | Platform | Chain | API type | Key required |
-|-----|----------|-------|----------|:---:|
-| `renaiss` | [Renaiss](https://renaiss.xyz) | BNB Chain | tRPC, public | — |
-| `beezie` | [Beezie](https://beezie.com) | Ethereum | REST, public | — |
-| `ready` | Ready | — | REST, public | — |
-| `mnstr` | MNSTR | — | REST, public | — |
-| `playkami` | [PlayKami](https://playkami.com) | — | REST, public | — |
-| `collector_crypt` | [Collector Crypt](https://collectorcrypt.io) | Solana | Magic Eden v2 (official public API) | — |
-| `phygitals` | [Phygitals](https://phygitals.io) | Solana | Magic Eden v2 (official public API) | — |
-| `courtyard` | [Courtyard](https://courtyard.io) | Polygon | OpenSea v2 (official public API) | `OPENSEA_API_KEY` |
+## Sources
 
-## Environment variables
+All 7 default sources require no API key. `courtyard` is opt-in (requires an OpenSea key).
 
-| Variable | Required | Description |
-|----------|----------|-------------|
-| `OPENSEA_API_KEY` | For `courtyard` only | OpenSea API v2 key |
+| Key | Platform | Chain | API |
+|-----|----------|-------|-----|
+| `renaiss` | [Renaiss](https://renaiss.xyz) | BNB Chain | tRPC, public |
+| `beezie` | [Beezie](https://beezie.com) | Ethereum | REST, public |
+| `ready` | Ready | — | REST, public |
+| `mnstr` | MNSTR | — | REST, public |
+| `playkami` | [PlayKami](https://playkami.com) | — | REST, public |
+| `collector_crypt` | [Collector Crypt](https://collectorcrypt.io) | Solana | Magic Eden v2 |
+| `phygitals` | [Phygitals](https://phygitals.io) | Solana | Magic Eden v2 |
+| `courtyard` | [Courtyard](https://courtyard.io) | Polygon | OpenSea v2 |
 
-Copy `.env.example` to `.env` and fill in values. With the `dotenv` optional dependency (`uv sync --extra dotenv`), the `.env` file is loaded automatically on each run.
+**Why live-only?** None of these platforms expose historical listing data via their APIs. They return current inventory state. This is a fundamental constraint of the data layer, not a design choice — the only path to historical data is snapshot accumulation over time.
 
-## Security & access posture
+---
 
-Every source in the default run uses a **public, unauthenticated API endpoint** — the same ones each platform's own frontend calls. No credentials are embedded in this repository, no auth tokens are spoofed, and no Cloudflare or bot-detection bypass is attempted.
+## Enabling Courtyard (OpenSea key)
 
-The HTTP client sends an honest `User-Agent: Mozilla/5.0 (compatible; marketplace_aggregator/0.1)`, uses HTTP/2, and sleeps 150–250 ms between paginated requests to stay well within normal usage rates.
+```bash
+cp .env.example .env
+# edit .env: OPENSEA_API_KEY=your_key_here
 
-Two sources use **official documented public APIs** with explicit third-party support: Magic Eden v2 (`collector_crypt`, `phygitals`) and OpenSea v2 (`courtyard`). The rest call open REST/tRPC endpoints with no authentication required by the platform.
+uv sync --extra dotenv   # installs python-dotenv
+uv run pokemon_tcg_marketplace_aggregator   # now includes courtyard
+```
+
+---
+
+## Rate limits and `--max-pages`
+
+`--max-pages N` caps each paginated source at N pages — useful for quick checks.
+
+| Source | Page size | Notes |
+|---|---|---|
+| `collector_crypt`, `phygitals` | 100 | Magic Eden public API, ~200 ms between pages |
+| `renaiss`, `beezie` | 50 | ~150 ms between pages |
+| `ready` | 1000 | Large pages, very few requests for full inventory |
+| `courtyard` | 100 + 1 per new NFT | First run is slow (trait fetches); warms after that |
+| `mnstr`, `playkami` | Single request | `--max-pages` has no effect |
+
+All sources retry HTTP 429 up to 3× with exponential back-off (5 s → 10 s → 20 s).
+
+| Goal | Command |
+|---|---|
+| Quick check | `--max-pages 1` |
+| Broad sweep | `--max-pages 5` |
+| Full inventory | omit `--max-pages` |
+
+---
 
 ## Output schema
-
-Each line is a JSON object with these fields:
 
 ```json
 {
@@ -212,13 +246,17 @@ Each line is a JSON object with these fields:
 }
 ```
 
-`grade` is `null` for raw/ungraded cards. `grader` is `null` when no grading company is known.
+`listed_at` is null for most sources — the platform APIs don't expose listing timestamps. `fetched_at` is always set and marks when this observation was recorded.
 
-## Adding a source
+---
 
-1. Create `src/marketplace_aggregator/sources/yourplatform.py` with a `fetch(client: httpx.Client, **kwargs) -> Iterator[OTCListing]` function.
-2. Register it in `src/marketplace_aggregator/sources/__init__.py`.
-3. Add it to `DEFAULT_SOURCES` if it should run by default.
+## Security & access posture
+
+Every source calls the same public endpoints the platform's own frontend uses. No auth tokens are spoofed, no Cloudflare bypass is attempted. The HTTP client sends an honest `User-Agent`, uses HTTP/2, and sleeps 150–250 ms between paginated pages.
+
+Magic Eden v2 (`collector_crypt`, `phygitals`) and OpenSea v2 (`courtyard`) are official documented public APIs with explicit third-party support.
+
+---
 
 ## Development
 
@@ -228,6 +266,12 @@ uv run pytest
 uv run ruff check src/
 uv run mypy src/
 ```
+
+## Adding a source
+
+1. Create `src/marketplace_aggregator/sources/yourplatform.py` with `fetch(client: httpx.Client, **kwargs) -> Iterator[OTCListing]`.
+2. Register in `src/marketplace_aggregator/sources/__init__.py`.
+3. Add to `DEFAULT_SOURCES`.
 
 ## License
 
